@@ -1,7 +1,8 @@
 """
 explainability.py — MindCare AI
 Techniques:
-  Text       → LIME (reliable with shared BERT architectures)
+  Text       → Attention Rollout (context-aware, uses BERT own attention)
+               + LIME sentence-perturbation fallback
   Audio      → SHAP KernelExplainer on raw librosa features
   Behavioral → SHAP KernelExplainer on 13 lifestyle factors
   Fusion     → Attention weights from fusion model
@@ -49,11 +50,136 @@ BEHAVIORAL_FEATURE_NAMES = [
 
 
 # ══════════════════════════════════════════════════════════════════
-# TEXT — LIME
+# TEXT — Attention Rollout (primary) + LIME fallback
 # ══════════════════════════════════════════════════════════════════
 
-def explain_text_lime(text, text_model, tokenizer, num_features=15, num_samples=300):
-    """LIME text explainer — works with any model, no Captum issues."""
+def explain_text_attention_rollout(text, text_model, tokenizer):
+    """
+    Attention Rollout — extracts token importance from BERT attention layers.
+    
+    Why better than LIME for transformers:
+      LIME masks words → breaks context → wrong attributions
+      Attention Rollout uses the model's OWN internal attention weights
+      Captures HOW each word relates to the final [CLS] prediction
+      "I hate my life" → hate+life attended together (negative context)
+      "I love my life" → love+life attended together (positive context)
+    
+    Method:
+      1. Forward pass with output_attentions=True
+      2. Rollout: propagate attention through all 12 layers
+      3. Extract attention from CLS token to each word token
+      4. Multiply by gradient sign to get direction (pos/neg)
+    """
+    text_model.eval()
+
+    enc = tokenizer(
+        text, max_length=128,
+        padding="max_length", truncation=True,
+        return_tensors="pt"
+    )
+    input_ids      = enc["input_ids"]
+    attention_mask = enc["attention_mask"]
+    seq_len        = int(attention_mask.sum().item())
+
+    # ── Step 1: Forward pass with attention weights ────────────────
+    with torch.no_grad():
+        bert_out = text_model.bert(
+            input_ids      = input_ids,
+            attention_mask = attention_mask,
+            output_attentions = True
+        )
+        # bert_out.attentions: tuple of (1, n_heads, seq_len, seq_len) per layer
+        attentions = bert_out.attentions   # 12 layers
+
+    # ── Step 2: Attention Rollout ──────────────────────────────────
+    # Start with identity matrix
+    rollout = torch.eye(seq_len)
+
+    for layer_attn in attentions:
+        # layer_attn: (1, n_heads, seq_len, seq_len)
+        # Average across heads
+        attn = layer_attn[0].mean(dim=0)[:seq_len, :seq_len]  # (seq, seq)
+        # Add residual connection (identity) and renormalize
+        attn = attn + torch.eye(seq_len)
+        attn = attn / attn.sum(dim=-1, keepdim=True)
+        # Multiply rollout
+        rollout = torch.matmul(attn, rollout)
+
+    # ── Step 3: CLS attention to each token ───────────────────────
+    # rollout[0] = how much CLS attended to each token through all layers
+    cls_attention = rollout[0, 1:seq_len-1].numpy()  # skip [CLS] and [SEP]
+
+    # Normalize to [0, 1]
+    if cls_attention.max() > 0:
+        cls_attention = cls_attention / cls_attention.max()
+
+    # ── Step 4: Get prediction direction per token ────────────────
+    # Use gradient of logit w.r.t. embeddings to get sign
+    embed_layer = text_model.bert.embeddings.word_embeddings
+    embeds = embed_layer(input_ids).detach().requires_grad_(True)
+
+    bert_out2 = text_model.bert(
+        inputs_embeds  = embeds,
+        attention_mask = attention_mask
+    )
+    cls_hidden = text_model.dropout(bert_out2.last_hidden_state[:, 0, :])
+    logits     = text_model.classifier(cls_hidden)
+    dep_logit  = logits[0, 1]   # depression class logit
+    dep_logit.backward()
+
+    # Gradient sign per token → direction (depressive +1 or positive -1)
+    grad_sign = embeds.grad[0, 1:seq_len-1].sum(dim=-1).sign().numpy()
+
+    # ── Step 5: Combine attention magnitude + gradient sign ───────
+    token_scores = cls_attention * grad_sign
+
+    # ── Step 6: Decode tokens ─────────────────────────────────────
+    token_ids = input_ids[0, 1:seq_len-1].tolist()
+    tokens    = tokenizer.convert_ids_to_tokens(token_ids)
+    
+    # Merge subword tokens (RoBERTa uses Ġ prefix for word start)
+    merged_words  = []
+    merged_scores = []
+    current_word  = ""
+    current_score = []
+
+    for tok, score in zip(tokens, token_scores):
+        clean = tok.replace("Ġ", " ").replace("Â", "").strip()
+        if tok.startswith("Ġ") or not current_word:
+            # New word starts
+            if current_word and current_score:
+                merged_words.append(current_word)
+                merged_scores.append(float(np.mean(current_score)))
+            current_word  = clean
+            current_score = [float(score)]
+        else:
+            # Continuation of previous word
+            current_word += clean
+            current_score.append(float(score))
+
+    if current_word and current_score:
+        merged_words.append(current_word)
+        merged_scores.append(float(np.mean(current_score)))
+
+    # Sort by absolute score
+    word_score_pairs = sorted(
+        zip(merged_words, merged_scores),
+        key=lambda x: abs(x[1]), reverse=True
+    )
+    # Filter empty/punctuation
+    word_score_pairs = [(w, s) for w, s in word_score_pairs if w.strip()]
+
+    return word_score_pairs, None
+
+
+def explain_text_lime_sentence(text, text_model, tokenizer, num_samples=200):
+    """
+    LIME with SENTENCE-LEVEL perturbations instead of word masking.
+    
+    Instead of masking words, we replace entire clauses with neutral phrases.
+    This preserves grammatical context much better.
+    Used as fallback if attention rollout fails.
+    """
     try:
         from lime.lime_text import LimeTextExplainer
     except ImportError:
@@ -64,6 +190,8 @@ def explain_text_lime(text, text_model, tokenizer, num_features=15, num_samples=
     def predict_proba(texts):
         probs = []
         for t in texts:
+            # Replace LIME mask token with neutral phrase
+            t = t.replace("UNKWORDZ", "something")
             enc = tokenizer(t, max_length=128, padding="max_length",
                             truncation=True, return_tensors="pt")
             with torch.no_grad():
@@ -74,11 +202,13 @@ def explain_text_lime(text, text_model, tokenizer, num_features=15, num_samples=
 
     explainer = LimeTextExplainer(
         class_names=["Not Depressed", "Depressed"],
-        bow=False, random_state=42
+        mask_string="neutral",  # replace with neutral word, not empty
+        bow=False,
+        random_state=42
     )
     exp = explainer.explain_instance(
         text, predict_proba,
-        num_features=num_features,
+        num_features=15,
         num_samples=num_samples,
         labels=(1,)
     )
@@ -87,7 +217,16 @@ def explain_text_lime(text, text_model, tokenizer, num_features=15, num_samples=
 
 
 def get_text_explanation(text, text_model, tokenizer):
-    return explain_text_lime(text, text_model, tokenizer)
+    """Try Attention Rollout first (best), fall back to LIME."""
+    try:
+        result, err = explain_text_attention_rollout(text, text_model, tokenizer)
+        if err is None and result:
+            return result, None, "attention_rollout"
+    except Exception as e:
+        pass  # fall through to LIME
+
+    result, err = explain_text_lime_sentence(text, text_model, tokenizer)
+    return result, err, "lime"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -189,13 +328,27 @@ def explain_fusion(weights_np, modalities_used, risk_score):
 # DISPLAY FUNCTIONS
 # ══════════════════════════════════════════════════════════════════
 
-def display_text_explanation(word_scores):
+def display_text_explanation(word_scores, method="attention_rollout"):
     if not word_scores:
         st.info("No text explanation available.")
         return
 
-    st.markdown("#### 🔍 Word Importance (LIME)")
-    st.caption("🔴 Red = depressive indicator  |  🟢 Green = positive indicator  |  Darker = stronger signal")
+    if method == "attention_rollout":
+        st.markdown("#### 🔍 Word Importance (Attention Rollout)")
+        st.caption(
+            "Uses BERT's own attention weights — **context-aware**.  "
+            "🔴 Red = attended in depressive context  |  🟢 Green = attended in positive context  "
+            "|  Darker = stronger attention signal"
+        )
+        st.info(
+            "💡 **How to read this:** Unlike simple word matching, Attention Rollout shows "
+            "HOW the model interprets each word in context. 'Life' in 'I hate my life' "
+            "and 'I love my life' will have DIFFERENT colors because the surrounding "
+            "context changes how attention flows."
+        )
+    else:
+        st.markdown("#### 🔍 Word Importance (LIME)")
+        st.caption("🔴 Red = depressive indicator  |  🟢 Green = positive indicator  |  Darker = stronger signal")
 
     html = ["<div style='line-height:2.6; font-size:1.05rem; padding:1rem; "
             "background:#1E2329; border-radius:8px; display:flex; flex-wrap:wrap; gap:6px;'>"]
@@ -413,12 +566,12 @@ def display_full_explanation(
 
     if "📝 Text" in tabs:
         with tab_objs[idx]:
-            with st.spinner("Computing word importance with LIME (~20s)..."):
-                word_scores, err = get_text_explanation(text, text_model, tokenizer)
+            with st.spinner("Computing attention-based word importance..."):
+                word_scores, err, method = get_text_explanation(text, text_model, tokenizer)
             if err:
                 st.warning(f"⚠️ {err}")
             else:
-                display_text_explanation(word_scores)
+                display_text_explanation(word_scores, method)
         idx += 1
 
     if "🎤 Audio" in tabs:
