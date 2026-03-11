@@ -1,0 +1,6 @@
+__pycache__
+.streamlit
+venv
+old
+audio sample
+firebase-key.json
