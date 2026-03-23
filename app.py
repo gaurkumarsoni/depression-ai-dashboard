@@ -8,7 +8,7 @@ import os, pickle, json, tempfile, time
 
 # Page config — must be first
 st.set_page_config(
-    page_title = "MindCare AI",
+    page_title = "Luminad-D AI",
     page_icon  = "🧠",
     layout     = "wide",
     initial_sidebar_state = "expanded"
@@ -122,6 +122,7 @@ def init_session_state():
         "beh_feat_names"       : None,
         "beh_shap_err"         : None,
         "beh_raw_values"       : None,
+        "chat_input_key" : 0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -375,7 +376,7 @@ def display_results(result, phq9_data=None, show_weights=True):
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("## 🧠 MindCare AI")
+    st.markdown("## 🧠 LUMINA-D AI")
     st.markdown("---")
 
     with st.expander("⚙️ Configuration", expanded=not st.session_state.models_loaded):
@@ -464,7 +465,7 @@ with st.sidebar:
 if st.session_state.page == "home":
     st.markdown("""
     <div class="main-header">
-        <h1>🧠 MindCare AI</h1>
+        <h1>🧠 LUMINA-D AI</h1>
         <p style="font-size:1.2rem">Explainable Multimodal Depression Screening</p>
         <p>Audio • Text • Behavioral Analysis</p>
     </div>
@@ -584,7 +585,7 @@ elif st.session_state.page == "chat":
             typed = st.text_input(
                 "Message:",
                 placeholder="How are you feeling today?",
-                key="chat_input",
+                key=f"chat_input_{st.session_state.chat_input_key}",
                 label_visibility="collapsed"
             )
         with col2:
@@ -629,16 +630,15 @@ elif st.session_state.page == "chat":
             else:
                 st.info(f"✅ Audio already analyzed: *{audio_file.name}*")
 
-    # Process new message
+     # Process new message
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
-        with st.spinner("MindCare AI is thinking..."):
+        with st.spinner("LUMINA-D AI is thinking..."):
             response = st.session_state.conversation.chat(user_input)
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         if st.session_state.conversation.is_ready_for_analysis():
             st.session_state["ready_for_analysis"] = True
-        # Bug 5 fix: clear text box so next message starts empty
-        st.session_state["chat_input"] = ""
+        st.session_state.chat_input_key += 1
         st.rerun()
 
     st.markdown("---")
@@ -879,7 +879,6 @@ elif st.session_state.page == "manual":
         # Show SHAP results if already computed (persists across reruns)
         if st.session_state.get("audio_shap_values") is not None:
             st.markdown("---")
-            st.markdown("#### 🎤 Audio Feature Importance (SHAP)")
             from explainability import display_audio_explanation
             display_audio_explanation(
                 st.session_state["audio_shap_values"],
@@ -1160,7 +1159,7 @@ elif st.session_state.page == "manual":
                 st.download_button(
                     label               = "⬇️ Download Clinical Report",
                     data                = st.session_state["pdf_bytes"],
-                    file_name           = f"mindcare_clinical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    file_name           = f"luminad_clinical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                     mime                = "application/pdf",
                     use_container_width = True,
                     key                 = "manual_pdf_dl"
@@ -1386,7 +1385,7 @@ elif st.session_state.page == "progress":
             st.download_button(
                 label               = "⬇️ Download Clinical Report",
                 data                = st.session_state["pdf_bytes"],
-                file_name           = f"mindcare_clinical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                file_name           = f"luminad_clinical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                 mime                = "application/pdf",
                 use_container_width = True,
                 key                 = "progress_pdf_dl"

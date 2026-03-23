@@ -1,5 +1,5 @@
 """
-audio_processor.py — MindCare AI
+audio_processor.py — LUMINA-D AI
 Audio feature extraction using opensmile eGeMAPS (clinical standard).
 
 eGeMAPS = Extended Geneva Minimalistic Acoustic Parameter Set

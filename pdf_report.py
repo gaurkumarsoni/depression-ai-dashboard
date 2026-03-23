@@ -1,5 +1,5 @@
 """
-pdf_report.py — MindCare AI
+pdf_report.py — LUMINA-D AI
 Generates a comprehensive clinical-grade screening report.
 
 Sections:
@@ -205,7 +205,7 @@ def generate_pdf_report(
 
     # ── 1. HEADER ─────────────────────────────────────────────────
     hdr = Table([
-        [Paragraph("🧠  MindCare AI", S["title"])],
+        [Paragraph("🧠  LUMINA-D AI", S["title"])],
         [Paragraph("Mental Health Screening Report", S["subtitle"])],
         [Paragraph(
             f"Generated: {datetime.now().strftime('%B %d, %Y  at  %H:%M')}  ·  "
@@ -483,7 +483,7 @@ def generate_pdf_report(
         S["disc"]
     ))
     content.append(Paragraph(
-        "MindCare AI  ·  Explainable Multimodal Depression Screening  ·  Research Prototype — NOT for Clinical Use",
+        "LUMINA-D AI  ·  Explainable Multimodal Depression Screening  ·  Research Prototype — NOT for Clinical Use",
         S["disc"]
     ))
 
@@ -492,8 +492,8 @@ def generate_pdf_report(
         buf, pagesize=A4,
         rightMargin=0.65*inch, leftMargin=0.65*inch,
         topMargin=0.65*inch,   bottomMargin=0.65*inch,
-        title=f"MindCare AI Report — {user_name}",
-        author="MindCare AI"
+        title=f"LUMINA-D AI Report — {user_name}",
+        author="LUMINA-D AI"
     )
     doc.build(content)
     pdf = buf.getvalue()
@@ -631,5 +631,5 @@ def _recommendations(risk_score, phq9_score, phq9_sev, text_sev, audio_conf, beh
         "Evidence-based self-care: 30 min/day physical exercise, social support maintenance, "
         "mindfulness/meditation, structured daily routine, and journaling."
     )
-    recs.append("Repeat screening in 2–4 weeks to track response to interventions using MindCare AI progress tracker.")
+    recs.append("Repeat screening in 2–4 weeks to track response to interventions using LUMINA-D AI progress tracker.")
     return recs

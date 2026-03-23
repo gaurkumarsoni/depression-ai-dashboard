@@ -1,5 +1,5 @@
 """
-explainability.py — MindCare AI
+explainability.py — LUMINA-D AI
 Techniques:
   Text       → Attention Rollout (context-aware, uses BERT own attention)
                + LIME sentence-perturbation fallback
