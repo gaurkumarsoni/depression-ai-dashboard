@@ -6,9 +6,12 @@ import json
 import os
 
 # ── Initialize Firebase ────────────────────────────────────────────
-def init_firebase(key_path: str = "firebase-key.json"):
+def init_firebase(key_path: str = "firebase-key.json", key_dict: dict = None):
     if not firebase_admin._apps:
-        cred = credentials.Certificate(key_path)
+        if key_dict:
+            cred = credentials.Certificate(key_dict)
+        else:
+            cred = credentials.Certificate(key_path)
         firebase_admin.initialize_app(cred)
     return firestore.client()
 

@@ -27,6 +27,30 @@ from firebase_manager import (
 )
 from pdf_report import generate_pdf_report
 
+# ── Config loader — secrets (cloud) or local file (dev) ───────────
+def get_config():
+    """
+    Returns (firebase_key_dict_or_None, groq_api_key_str_or_None).
+    Priority: Streamlit secrets → local files.
+    """
+    firebase_cfg = None
+    groq_key     = None
+
+    try:
+        # ── Streamlit Cloud: secrets.toml ──────────────────────────
+        firebase_cfg = dict(st.secrets["firebase"])
+        groq_key     = st.secrets.get("groq_api_key", "")
+    except Exception:
+        # ── Local dev: JSON files ──────────────────────────────────
+        if os.path.exists("firebase-key.json"):
+            with open("firebase-key.json") as f:
+                firebase_cfg = json.load(f)
+        if os.path.exists("groq-key.txt"):
+            with open("groq-key.txt") as f:
+                groq_key = f.read().strip()
+
+    return firebase_cfg, groq_key
+
 DEVICE = torch.device("cpu")
 
 # ── CSS Styling ────────────────────────────────────────────────────
@@ -379,27 +403,43 @@ with st.sidebar:
     st.markdown("## 🧠 LUMINA-D AI")
     st.markdown("---")
 
-    with st.expander("⚙️ Configuration", expanded=not st.session_state.models_loaded):
-        groq_key    = st.text_input("Groq API Key",
-                                     type="password",
-                                     value=st.session_state.groq_key)
-        firebase_ok = os.path.exists("firebase-key.json")
-        if firebase_ok:
-            st.success("✅ Firebase key found")
-        else:
-            st.error("❌ firebase-key.json not found")
+    try:
+        firebase_cfg, auto_groq = get_config()
+    except Exception:
+        firebase_cfg, auto_groq = None, None
 
-        if st.button("🚀 Load Models", use_container_width=True):
-            with st.spinner("Loading AI models... (~2 mins first time)"):
-                try:
-                    st.session_state.models        = get_models()
-                    st.session_state.models_loaded = True
-                    st.session_state.groq_key      = groq_key
-                    if firebase_ok:
-                        st.session_state.db = init_firebase()
-                    st.success("✅ Models loaded!")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+    # Groq key — hidden if auto-loaded from secrets or groq-key.txt
+    if auto_groq:
+        groq_key = auto_groq
+        st.success("✅ Groq API key loaded automatically")
+    else:
+        groq_key = st.text_input("Groq API Key",
+                                  type="password",
+                                  value=st.session_state.groq_key,
+                                  placeholder="gsk_...")
+
+    # Firebase status
+    if firebase_cfg:
+        st.success("✅ Firebase config loaded")
+    elif os.path.exists("firebase-key.json"):
+        st.success("✅ Firebase key found (local file)")
+    else:
+        st.warning("⚠️ Firebase not configured — progress saving disabled")
+
+    # Load Models button — always visible regardless of groq key source
+    if st.button("🚀 Load Models", use_container_width=True):
+        with st.spinner("Loading AI models... (~2 mins first time)"):
+            try:
+                st.session_state.models        = get_models()
+                st.session_state.models_loaded = True
+                st.session_state.groq_key      = auto_groq or groq_key
+                if firebase_cfg:
+                    st.session_state.db = init_firebase(key_dict=firebase_cfg)
+                elif os.path.exists("firebase-key.json"):
+                    st.session_state.db = init_firebase()
+                st.success("✅ Models loaded!")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
     st.markdown("---")
     st.markdown("### 📍 Navigation")
