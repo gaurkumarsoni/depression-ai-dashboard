@@ -57,8 +57,10 @@ def save_session(db, user_id: str, session_data: dict):
     session_ref.set(session_data)
 
     # Update session count
+    # firestore.INCREMENT was removed in newer firebase-admin versions
+    # Use firestore.Increment(n) instead
     db.collection("users").document(user_id).update({
-        "sessions": firestore.INCREMENT(1)
+        "sessions": firestore.Increment(1)
     })
 
     return session_id
@@ -123,9 +125,41 @@ def detect_anomaly(scores: list, threshold: float = 0.20) -> bool:
     return abs(latest - baseline) > threshold
 
 
-def map_to_phq9(risk_score: float) -> dict:
-    """Map model risk score to PHQ-9 equivalent range"""
+def map_to_phq9(risk_score: float, beh_features_raw=None) -> dict:
+    """
+    Map model risk score to PHQ-9 equivalent range.
+    
+    Also accepts raw behavioral features to apply clinical overrides.
+    PHQ-9 item 9 (suicidal ideation) = automatic minimum score of 20 (Moderately Severe).
+    """
     phq9_score = int(risk_score * 27)
+
+    # ── Clinical override: suicidal thoughts = always Moderately Severe minimum ──
+    # beh_features_raw shape: (1, 13)
+    # Index 9 = Suicidal Thoughts (0=No, 1=Yes) per BEHAVIORAL_FEATURE_NAMES
+    suicidal_override = False
+    if beh_features_raw is not None:
+        try:
+            import numpy as _np
+            raw = _np.array(beh_features_raw).flatten()
+            if len(raw) > 9 and raw[9] >= 0.5:   # index 9 = Suicidal Thoughts
+                phq9_score     = max(phq9_score, 20)  # PHQ-9 item 9 auto-escalates
+                suicidal_override = True
+        except Exception:
+            pass
+
+    # ── Sleep override: <5hrs sleep is a major depression indicator ──
+    # Index 7 = Sleep Duration (encoded: 0="Less than 5 hours", higher=more sleep)
+    sleep_override = False
+    if beh_features_raw is not None:
+        try:
+            import numpy as _np
+            raw = _np.array(beh_features_raw).flatten()
+            if len(raw) > 7 and raw[7] <= 0.5:   # 0 = "Less than 5 hours"
+                phq9_score  = max(phq9_score, 10)
+                sleep_override = True
+        except Exception:
+            pass
 
     if phq9_score <= 4:
         severity = "Minimal"
@@ -142,17 +176,24 @@ def map_to_phq9(risk_score: float) -> dict:
     elif phq9_score <= 19:
         severity = "Moderately Severe"
         color    = "#FF5722"
-        advice   = "Active treatment recommended."
+        advice   = "Active treatment recommended. Consider medication evaluation."
     else:
         severity = "Severe"
         color    = "#F44336"
-        advice   = "Immediate treatment and close follow-up."
+        advice   = "Immediate treatment required. Risk assessment for safety."
+
+    override_note = ""
+    if suicidal_override:
+        override_note = " ⚠️ Escalated: suicidal ideation reported (PHQ-9 item 9)."
+    elif sleep_override:
+        override_note = " Sleep deprivation flagged as clinical risk factor."
 
     return {
-        "phq9_score": phq9_score,
-        "severity"  : severity,
-        "color"     : color,
-        "advice"    : advice
+        "phq9_score"     : phq9_score,
+        "severity"       : severity,
+        "color"          : color,
+        "advice"         : advice + override_note,
+        "suicidal_flag"  : suicidal_override,
     }
 
 
