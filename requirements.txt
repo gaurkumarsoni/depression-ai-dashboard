@@ -1,76 +1,19 @@
-# ═══════════════════════════════════════════════════════════════════
-# MindCare AI — Depression Detection Dashboard
-# Python 3.10 · Windows 11 · CPU inference
-# Install order: torch first (see README), then pip install -r this
-# ═══════════════════════════════════════════════════════════════════
-
-# ── Core Framework ────────────────────────────────────────────────
-streamlit==1.35.0
-# Ai
-
-# ── Deep Learning ─────────────────────────────────────────────────
-# Install manually first:
-# pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2
-torchvision==0.17.2
-torchaudio==2.2.2
-
-# ── Transformers / NLP ────────────────────────────────────────────
-transformers==4.40.2
-tokenizers==0.19.1
-huggingface-hub==0.23.2
-sentencepiece==0.2.0
-accelerate==0.30.0
-safetensors==0.4.3
-
-# ── Sentence-level Embeddings (upgrade from raw CLS token) ────────
-# Full sentence embeddings, semantic similarity, much better context
-sentence-transformers==2.7.0
-
-# ── Sentiment Analysis (upgrade: handles negation + intensifiers) ─
-vaderSentiment==3.3.2          # "not happy" → negative ✅
-textblob==0.18.0               # subjectivity + polarity scores
-
-# ── Audio — Clinical Grade (upgrade from librosa) ─────────────────
-# opensmile: extracts eGeMAPS (88 features) — gold standard for
-# depression/emotion detection, used in AVEC challenge benchmarks
-# Requires Visual C++ redistributable on Windows (already installed with Python)
-opensmile==2.5.0
-
-# librosa kept as fallback + for spectral display in UI
-librosa==0.10.2
-soundfile==0.12.1
-
-# ── Speech-to-Text — Offline (upgrade from Google API) ────────────
-# Whisper runs fully locally, no internet needed, accurate
-#openai-whisper==20231117
-#ffmpeg-python==0.2.0           # whisper needs ffmpeg (install ffmpeg separately)
-
-# ── Explainability ────────────────────────────────────────────────
-shap==0.45.1
-lime==0.2.0.1
-# ferret: transformer-native attribution (attention rollout, etc.)
-ferret-xai==0.4.1
-
-# ── Scientific Computing ──────────────────────────────────────────
-numpy==1.26.4
-scipy==1.13.1
-scikit-learn==1.4.2
-pandas==2.2.2
-numba==0.59.1                  # speeds up librosa
-
-# ── Visualization ─────────────────────────────────────────────────
-plotly==5.22.0
-matplotlib==3.9.0
-
-# ── Utilities ─────────────────────────────────────────────────────
-tqdm==4.66.4
-Pillow==10.3.0
-joblib==1.4.2
-requests==2.32.2
-packaging==24.0
-
-#installing missing modules
-groq == 0.4.2
+streamlit>=1.35.0
+torch
+transformers
+huggingface-hub
+numpy
+pandas
+plotly
+scikit-learn
 firebase-admin
+groq
+openai-whisper
+SpeechRecognition
+librosa
+soundfile
+opensmile
 reportlab
+shap
+lime
+sentence-transformers
